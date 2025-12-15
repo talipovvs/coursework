@@ -1,92 +1,107 @@
+%%writefile app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
-import seaborn as sns
-from sklearn.metrics import roc_curve, roc_auc_score
-from sklearn.metrics import silhouette_score, accuracy_score, r2_score
-import plotly.express as px
+from sklearn.metrics import roc_curve, roc_auc_score, silhouette_score, accuracy_score, r2_score
 from sklearn.linear_model import LinearRegression
+import plotly.express as px
 
 st.set_page_config(page_title="Data Explorer", layout="wide")
 sns.set_style("whitegrid")
 
 # -------------------------------------------------------------------
-# Страницы (имитация мультистраничного приложения)
+# Страницы
 # -------------------------------------------------------------------
 page = st.sidebar.selectbox("Выберите страницу", ["Главная", "Analysis Results"])
 
 # -------------------------------------------------------------------
-# Загрузка данных (одинаково для всех страниц)
+# Загрузка данных
 # -------------------------------------------------------------------
 df = pd.read_csv("dftrain_clean.csv")
 num_cols = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
 cat_cols = df.select_dtypes(include=['object']).columns.tolist()
 cat_cols = [c for c in cat_cols if c != "Overview"]
 
+FIG_SIZE = (7, 4)
+
 # ===========================
 # ГЛАВНАЯ СТРАНИЦА
 # ===========================
 if page == "Главная":
     st.title("Главная — Визуализация данных")
-
+    
     st.subheader("Первые 20 строк датасета")
     st.dataframe(df.head(20))
-
-    # KPI
+    
     st.header("KPI и базовые статистики")
     col1, col2, col3 = st.columns(3)
     col1.metric("Общее количество записей", df.shape[0])
     col2.metric("Количество колонок", df.shape[1])
     col3.metric("Пропущенные значения", df.isna().sum().sum())
-
-    # Базовая статистика
+    
     st.subheader("Статистика числовых признаков")
     stats = df.describe().T[['mean', '50%', 'std']].rename(columns={'50%': 'median'})
-    st.dataframe(stats)
+    st.dataframe(stats.style.format("{:.2f}"))
 
-    # Числовые распределения
-    st.header("Распределение числовых признаков")
+    st.header("Распределение числовых признаков (интерактивно)")
     for col in num_cols:
         st.write(f"### {col}")
-        fig, ax = plt.subplots(1, 2, figsize=(14, 4))
-        sns.histplot(df[col].dropna(), kde=True, ax=ax[0])
-        ax[0].set_title(f"Гистограмма {col}")
-        sns.boxplot(x=df[col], ax=ax[1])
-        ax[1].set_title(f"Boxplot {col}")
-        st.pyplot(fig)
+        fig = px.histogram(df, x=col, nbins=50, marginal="box", hover_data=[col])
+        fig.update_layout(title=f"Гистограмма и Boxplot — {col}", height=400)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    st.header("Категориальные признаки (интерактивно)")
+    TOP_N = 20  # показывать только топ N значений
 
-    # Категориальные признаки
-    st.header("Категориальные признаки")
     for col in cat_cols:
         st.write(f"### {col}")
-        vc = df[col].value_counts().head(20)
-        fig, ax = plt.subplots(figsize=(10, 4))
-        vc.plot(kind='bar', ax=ax)
-        ax.set_title(f"Bar chart (Top 20) — {col}")
-        st.pyplot(fig)
+        
+        # Берем топ-N значений
+        vc = df[col].value_counts().head(TOP_N).reset_index()
+        vc.columns = [col, "count"]
+        
+        # Горизонтальный bar chart
+        fig = px.bar(
+            vc,
+            x="count",
+            y=col,
+            orientation='h',
+            text="count",
+            hover_data=[col, "count"]
+        )
+        fig.update_layout(
+            title=f"Bar chart — топ {TOP_N} значений {col}",
+            yaxis={'categoryorder':'total ascending'},  # сортировка по убыванию
+            height=400
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Pie chart (только для наглядности)
+    fig_pie = px.pie(vc, names=col, values="count", hover_data=[col, "count"], hole=0.3)
+    fig_pie.update_layout(title=f"Pie chart — топ {TOP_N} значений {col}", height=400)
+    st.plotly_chart(fig_pie, use_container_width=True)
 
-        fig, ax = plt.subplots(figsize=(5, 5))
-        vc.plot(kind='pie', autopct='%1.1f%%', ax=ax)
-        ax.set_ylabel("")
-        ax.set_title(f"Pie chart — {col}")
-        st.pyplot(fig)
-
-    # Корреляционная матрица
-    st.header("Корреляционная матрица")
+    st.header("Корреляционная матрица (интерактивно)")
     if len(num_cols) > 1:
-        fig, ax = plt.subplots(figsize=(10, 8))
-        sns.heatmap(df[num_cols].corr(), annot=True, cmap="coolwarm", fmt=".2f", ax=ax)
-        ax.set_title("Correlation Heatmap")
-        st.pyplot(fig)
+        corr = df[num_cols].corr()
+        fig = px.imshow(corr, text_auto=".2f", color_continuous_scale='RdBu_r', zmin=-1, zmax=1)
+        fig.update_layout(title="Correlation Heatmap", height=600)
+        st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("Недостаточно числовых признаков для корреляционной матрицы")
+    
+    # Кнопка для обновления данных (пример)
+    if st.button("Обновить данные"):
+        st.experimental_rerun()
+
 
 # ===========================
-# ANALYSIS RESULTS — Страница 2
+# ANALYSIS RESULTS
 # ===========================
 elif page == "Analysis Results":
     st.title("Analysis Results — Результаты анализа")
@@ -112,19 +127,12 @@ elif page == "Analysis Results":
         df_num['Cluster'] = kmeans.fit_predict(X_scaled)
 
         pca = PCA(n_components=2, random_state=42)
-        pca_res = pca.fit_transform(X_scaled)
-        df_num['PCA1'] = pca_res[:, 0]
-        df_num['PCA2'] = pca_res[:, 1]
+        df_num[['PCA1','PCA2']] = pca.fit_transform(X_scaled)
 
         fig = px.scatter(
-            df_num,
-            x="PCA1",
-            y="PCA2",
-            color="Cluster",
-            size="Gross_log",
-            opacity=0.75,
+            df_num, x="PCA1", y="PCA2", color="Cluster", size="Gross_log", opacity=0.75,
             hover_data=["IMDB_Rating", "Gross", "Runtime", "No_of_Votes", "Released_Year"],
-            title="Кластеры фильмов (PCA 2D)",
+            title="Кластеры фильмов (PCA 2D)"
         )
         st.plotly_chart(fig, use_container_width=True)
 
@@ -132,115 +140,133 @@ elif page == "Analysis Results":
     # 2. ТРЕНДЫ И ВРЕМЕННЫЕ РЯДЫ
     # ---------------------------
     st.header("Тренды и временные ряды")
-    df_ts = df.copy()
-    df_ts["date"] = pd.to_datetime(df_ts["Released_Year"], format="%Y", errors="coerce")
-    df_ts = df_ts.dropna(subset=["date"]).sort_values("date")
 
-    if df_ts is not None:
-        num_cols_trend = [c for c in num_cols if c != "Released_Year"]
-        if num_cols_trend:
-            y_col = st.selectbox("Выберите числовой признак для тренда:", num_cols_trend)
-            fig, ax = plt.subplots(figsize=(8, 4))
-            ax.plot(df_ts["date"], df_ts[y_col], linewidth=2)
-            ax.set_title(f"Тренд: {y_col}")
-            ax.set_xlabel("Дата")
-            ax.set_ylabel(y_col)
-            st.pyplot(fig)
-        else:
-            st.info("Нет числовых признаков для построения тренда.")
+    df_ts = df.copy()
+    df_ts['Released_Year'] = pd.to_numeric(df_ts['Released_Year'], errors='coerce')
+    df_ts['Runtime'] = pd.to_numeric(df_ts['Runtime'], errors='coerce')
+
+    # Выбираем числовой признак для тренда
+    num_cols_trend = [c for c in num_cols if c != "Released_Year"]
+    if num_cols_trend:
+        y_col = st.selectbox("Выберите числовой признак для тренда:", num_cols_trend)
+
+        # Убираем строки с пропущенными значениями в Released_Year и выбранной колонке
+        df_ts_clean = df_ts.dropna(subset=['Released_Year', y_col])
+
+        # Агрегируем по году
+        df_yearly = df_ts_clean.groupby('Released_Year')[y_col].mean().reset_index()
+        df_yearly.rename(columns={'Released_Year': 'Year'}, inplace=True)
+
+        # Строим график
+        fig = px.line(df_yearly, x='Year', y=y_col, title=f"Тренд: {y_col}", markers=True)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Нет числовых признаков для построения тренда.")
+
 
     # ---------------------------
     # 3. ROC-кривая
     # ---------------------------
     st.header("ROC-кривая")
-    threshold = st.slider("Выберите порог для 'хорошего' фильма (IMDB_Rating):", 0.0, 10.0, 7.0)
+    threshold = st.slider("Порог IMDB для 'хорошего' фильма", 0.0, 10.0, 7.0)
     df['target'] = (df['IMDB_Rating'] >= threshold).astype(int)
-
     if 'Meta_score' in df.columns:
         df_plot = df.dropna(subset=['Meta_score'])
         y_true = df_plot['target']
         y_score = df_plot['Meta_score']
-
         if len(set(y_true)) < 2:
-            st.info("Невозможно построить ROC — все фильмы относятся к одному классу при текущем пороге.")
+            st.info("Невозможно построить ROC — все фильмы одного класса.")
         else:
-            fpr, tpr, thr = roc_curve(y_true, y_score)
+            fpr, tpr, _ = roc_curve(y_true, y_score)
             auc = roc_auc_score(y_true, y_score)
+            fig = px.area(
+                x=fpr, y=tpr, title=f"ROC-кривая (AUC={auc:.3f})",
+                labels=dict(x="False Positive Rate", y="True Positive Rate")
+            )
+            fig.add_shape(type='line', x0=0, y0=0, x1=1, y1=1, line=dict(dash='dash'))
+            st.plotly_chart(fig, use_container_width=True)
 
-            fig, ax = plt.subplots(figsize=(6,4))
-            ax.plot(fpr, tpr, label=f"AUC = {auc:.3f}")
-            ax.plot([0,1], [0,1], '--', color='gray', label="Random")
-            ax.set_xlabel("False Positive Rate")
-            ax.set_ylabel("True Positive Rate")
-            ax.set_title(f"ROC-кривая (порог IMDB >= {threshold})")
-            ax.legend()
-            st.write("Количество положительных фильмов:", y_true.sum())
-            st.write("Количество отрицательных фильмов:", len(y_true) - y_true.sum())
-            st.pyplot(fig)
-    else:
-        st.info("Колонка 'Meta_score' отсутствует — ROC-кривую построить невозможно.")
-
-
-    st.header(" Ключевые метрики и сравнение моделей")
-
-    # Silhouette Score
+    # ---------------------------
+    # 4. МОДЕЛИ И KPI
+    # ---------------------------
+    st.header("Ключевые метрики и сравнение моделей")
     sil_score = silhouette_score(X_scaled, df_num['Cluster']) if 'Cluster' in df_num.columns else None
-
-    threshold = st.slider("Порог IMDB для 'хорошего' фильма", 0.0, 10.0, 8.3)
-    df['target'] = (df['IMDB_Rating'] >= threshold).astype(int)
-
-    # Делаем простую модель с Votes_log и Gross_log
     df['Gross_log'] = np.log1p(df['Gross'])
     df['Votes_log'] = np.log1p(df['No_of_Votes'])
+    y_score_demo = (0.3*df['Gross_log'] + 0.7*df['Votes_log'] >= df['Gross_log'].median()).astype(int)
+    acc = accuracy_score(df['target'], y_score_demo)
 
-    # Простая линейная комбинация для демо
-    y_score = 0.3*df['Gross_log'] + 0.7*df['Votes_log']
-    y_score = (y_score >= y_score.median()).astype(int)
-
-    acc = accuracy_score(df['target'], y_score)
-    st.metric("Accuracy (демо)", f"{acc:.3f}")
-
-    # R² (демо регрессия)
+    # Простая регрессия
     df_reg = df.copy()
-    df_reg['Gross_log'] = np.log1p(df_reg['Gross'])
-    df_reg['Votes_log'] = np.log1p(df_reg['No_of_Votes'])
-
-    # Заполняем пропуски медианой
-    df_reg['Gross_log'].fillna(df_reg['Gross_log'].median(), inplace=True)
-    df_reg['Votes_log'].fillna(df_reg['Votes_log'].median(), inplace=True)
-    df_reg['IMDB_Rating'].fillna(df_reg['IMDB_Rating'].median(), inplace=True)
-    df_reg['Meta_score'].fillna(df_reg['Meta_score'].median(), inplace=True)
-
+    for c in ['Gross_log','Votes_log','IMDB_Rating','Meta_score']:
+        df_reg[c].fillna(df_reg[c].median(), inplace=True)
     X_reg = df_reg[['IMDB_Rating','Gross_log','Votes_log']]
     y_reg = df_reg['Meta_score']
-
     model = LinearRegression()
     model.fit(X_reg, y_reg)
     y_pred = model.predict(X_reg)
     r2 = r2_score(y_reg, y_pred)
-    st.metric("R² (регрессия)", f"{r2:.3f}")
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Silhouette Score (кластеризация)", f"{sil_score:.3f}" if sil_score else "N/A")
     col2.metric("Accuracy (демо)", f"{acc:.3f}")
-    col3.metric("R² (демо регрессия)", f"{r2:.3f}" if r2 else "N/A")
+    col3.metric("R² (регрессия)", f"{r2:.3f}")
 
-    # Сравнительная таблица
-    results = {
-        "Модель": ["KMeans", "Бинарная классификация по медиане IMDB", "Простая регрессия по Meta_score"],
-        "Метрика": ["Silhouette Score", "Accuracy", "R²"],
-        "Значение": [sil_score, acc, r2]
-    }
-    df_results = pd.DataFrame(results)
-    st.subheader("Сравнение моделей")
-    st.dataframe(df_results)
+    results = pd.DataFrame({
+        "Модель":["KMeans","Бинарная классификация","Линейная регрессия"],
+        "Метрика":["Silhouette Score","Accuracy","R²"],
+        "Значение":[sil_score, acc, r2]
+    })
+    st.dataframe(results)
 
-    # Визуализация KPI
-    st.subheader("Визуализация ключевых метрик")
-    fig, ax = plt.subplots(figsize=(8,4))
-    ax.bar(df_results["Модель"], df_results["Значение"], color=['skyblue','orange','green'])
-    ax.set_ylabel("Значение")
-    ax.set_title("Сравнение ключевых метрик моделей")
-    for i, v in enumerate(df_results["Значение"]):
-        ax.text(i, v + 0.01, f"{v:.2f}", ha='center', fontweight='bold')
-    st.pyplot(fig)
+    fig = px.bar(results, x="Модель", y="Значение", color="Метрика", text="Значение")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ---------------------------
+    # 5. Insights
+    # ---------------------------
+    st.header("Insights по кластерам")
+    if 'Cluster' in df_num.columns:
+        selected_cluster = st.selectbox("Выберите кластер", sorted(df_num['Cluster'].unique()))
+        cluster_df = df_num[df_num['Cluster']==selected_cluster]
+        global_mean = df_num[['Gross','IMDB_Rating','No_of_Votes']].mean()
+        cluster_mean = cluster_df[['Gross','IMDB_Rating','No_of_Votes']].mean()
+        diff_pct = ((cluster_mean-global_mean)/global_mean)*100
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Средний Gross", f"{cluster_mean['Gross']:.0f}", f"{diff_pct['Gross']:.1f}%")
+        col2.metric("Средний IMDB", f"{cluster_mean['IMDB_Rating']:.2f}", f"{diff_pct['IMDB_Rating']:.1f}%")
+        col3.metric("Среднее число голосов", f"{cluster_mean['No_of_Votes']:.0f}", f"{diff_pct['No_of_Votes']:.1f}%")
+        st.markdown(f"Фильмы кластера **{selected_cluster}** имеют доход {'выше' if diff_pct['Gross']>0 else 'ниже'} среднего на {abs(diff_pct['Gross']):.1f}%, рейтинг {'выше' if diff_pct['IMDB_Rating']>0 else 'ниже'} среднего на {abs(diff_pct['IMDB_Rating']):.1f}%")
+
+    # ---------------------------
+    # 6. Предсказания модели
+    # ---------------------------
+    st.header("Предсказания модели (Meta_score)")
+    df_pred = df_reg.copy()
+    df_pred['Predicted_Meta'] = y_pred
+    fig = px.line(
+        df_pred.head(100), y=['Meta_score','Predicted_Meta'],
+        labels={"value":"Meta_score","index":"Порядок фильмов"},
+        title="Факт vs Предсказание (первые 100 фильмов)"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ---------------------------
+    # 7. Feature importance
+    # ---------------------------
+    st.header("Влияние признаков (коэффициенты линейной регрессии)")
+    coef_df = pd.DataFrame({"Feature":X_reg.columns,"Coefficient":model.coef_}).set_index("Feature")
+    fig = px.imshow(coef_df, text_auto=True, color_continuous_scale='RdBu', title="Коэффициенты линейной регрессии")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ---------------------------
+    # 8. Сценарии анализа
+    # ---------------------------
+    st.header("Сценарии анализа")
+    scenario = st.radio("Выберите сценарий", ["Оценка по голосам","Оценка по доходу","Комбинированный"])
+    if scenario=="Оценка по голосам": score=df_reg['Votes_log']
+    elif scenario=="Оценка по доходу": score=df_reg['Gross_log']
+    else: score=0.5*df_reg['Votes_log']+0.5*df_reg['Gross_log']
+    fig = px.histogram(score, nbins=30, title=f"Распределение оценки — {scenario}")
+    st.plotly_chart(fig, use_container_width=True)
