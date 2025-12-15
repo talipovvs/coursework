@@ -1,13 +1,8 @@
-from google.colab import drive
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-import streamlit as st
-import numpy as np
-from scipy.stats import pearsonr, spearmanr, chi2_contingency, fisher_exact
-from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
-import plotly.express as px
-
-from pyngrok import ngrok
+streamlit
+pandas
+numpy
+matplotlib
+seaborn
+scikit-learn
+plotly
+scipy
