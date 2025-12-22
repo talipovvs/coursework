@@ -33,16 +33,42 @@ FIG_SIZE = (7, 4)
 # ===========================
 if page == "Главная":
     st.title("Главная — Визуализация данных")
-    
+
+    st.subheader("📘 Описание колонок датасета")
+
+    columns_description = {
+        "Series_Title": "Название фильма",
+        "Released_Year": "Год выхода фильма",
+        "Runtime": "Длительность фильма (в минутах)",
+        "Genre": "Жанр фильма",
+        "IMDB_Rating": "Рейтинг IMDb (оценка зрителей)",
+        "Meta_score": "Оценка критиков (Metacritic)",
+        "Director": "Режиссёр фильма",
+        "Star1": "Главная звезда фильма",
+        "Star2": "Вторая по значимости звезда",
+        "Star3": "Третья звезда фильма",
+        "Star4": "Четвёртая звезда фильма",
+        "No_of_Votes": "Количество голосов на IMDb",
+        "Gross": "Кассовые сборы фильма (USD)",
+        "Overview": "Краткое описание фильма"
+    }
+
+    df_columns_info = pd.DataFrame({
+        "Название колонки": columns_description.keys(),
+        "Описание": columns_description.values()
+    })
+
+    st.dataframe(df_columns_info, use_container_width=True)
+
     st.subheader("Первые 20 строк датасета")
     st.dataframe(df.head(20))
-    
+
     st.header("KPI и базовые статистики")
     col1, col2, col3 = st.columns(3)
     col1.metric("Общее количество записей", df.shape[0])
     col2.metric("Количество колонок", df.shape[1])
     col3.metric("Пропущенные значения", df.isna().sum().sum())
-    
+
     st.subheader("Статистика числовых признаков")
     stats = df.describe().T[['mean', '50%', 'std']].rename(columns={'50%': 'median'})
     st.dataframe(stats.style.format("{:.2f}"))
@@ -53,17 +79,17 @@ if page == "Главная":
         fig = px.histogram(df, x=col, nbins=50, marginal="box", hover_data=[col])
         fig.update_layout(title=f"Гистограмма и Boxplot — {col}", height=400)
         st.plotly_chart(fig, use_container_width=True)
-    
+
     st.header("Категориальные признаки (интерактивно)")
     TOP_N = 20  # показывать только топ N значений
 
     for col in cat_cols:
         st.write(f"### {col}")
-        
+
         # Берем топ-N значений
         vc = df[col].value_counts().head(TOP_N).reset_index()
         vc.columns = [col, "count"]
-        
+
         # Горизонтальный bar chart
         fig = px.bar(
             vc,
@@ -79,7 +105,7 @@ if page == "Главная":
             height=400
         )
         st.plotly_chart(fig, use_container_width=True)
-    
+
     # Pie chart (только для наглядности)
     fig_pie = px.pie(vc, names=col, values="count", hover_data=[col, "count"], hole=0.3)
     fig_pie.update_layout(title=f"Pie chart — топ {TOP_N} значений {col}", height=400)
@@ -93,7 +119,7 @@ if page == "Главная":
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("Недостаточно числовых признаков для корреляционной матрицы")
-    
+
     # Кнопка для обновления данных (пример)
     if st.button("Обновить данные"):
         st.experimental_rerun()
@@ -268,4 +294,75 @@ elif page == "Analysis Results":
     elif scenario=="Оценка по доходу": score=df_reg['Gross_log']
     else: score=0.5*df_reg['Votes_log']+0.5*df_reg['Gross_log']
     fig = px.histogram(score, nbins=30, title=f"Распределение оценки — {scenario}")
+    st.plotly_chart(fig, use_container_width=True)
+
+    
+    st.header("Влияние факторов на Meta_score")
+
+    importance = pd.DataFrame({
+        "Фактор": X_reg.columns,
+        "Влияние": model.coef_
+    }).sort_values("Влияние", ascending=False)
+
+    fig = px.bar(
+        importance,
+        x="Влияние",
+        y="Фактор",
+        orientation="h",
+        title="Влияние признаков на прогноз Meta_score"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+  
+    # ---------------------------
+    # 10. Актёры-катализаторы успеха
+    # ---------------------------
+    st.header("Актёры и влияние на успех фильма")
+
+    st.markdown("""
+    Actor Impact Score показывает, насколько фильмы с участием актёра
+    в среднем зарабатывают больше (или меньше), чем рынок в целом.
+    """)
+
+    # Разделяем список актёров
+    actors_df = df[['Star1', 'Star2', 'Star3', 'Star4', 'Gross']].dropna()
+
+    actors_long = actors_df.melt(
+        id_vars='Gross',
+        value_vars=['Star1', 'Star2', 'Star3', 'Star4'],
+        value_name='Actor'
+    )
+
+    actor_stats = (
+        actors_long
+        .groupby('Actor')
+        .agg(
+            Avg_Gross=('Gross', 'mean'),
+            Movies=('Gross', 'count')
+        )
+        .query("Movies >= 5")  # фильтр по количеству фильмов
+    )
+
+    global_avg = df['Gross'].mean()
+    actor_stats['Impact'] = actor_stats['Avg_Gross'] - global_avg
+
+    top_actors = actor_stats.sort_values('Impact', ascending=False).head(15).reset_index()
+
+    fig = px.bar(
+        top_actors,
+        x='Impact',
+        y='Actor',
+        orientation='h',
+        text='Movies',
+        title="Актёры-катализаторы коммерческого успеха",
+        hover_data=['Avg_Gross', 'Movies']
+    )
+
+    fig.update_layout(
+        yaxis={'categoryorder':'total ascending'},
+        xaxis_title="Превышение среднего дохода ($)",
+        height=500
+    )
+
     st.plotly_chart(fig, use_container_width=True)
