@@ -151,15 +151,137 @@ elif page == "Analysis Results":
         kmeans = KMeans(n_clusters=k, random_state=42)
         df_num['Cluster'] = kmeans.fit_predict(X_scaled)
 
+        # Функция для определения типа кластера
+        def get_cluster_description(cluster_df, global_stats):
+            """Автоматически определяет тип кластера по его характеристикам"""
+            cluster_means = cluster_df[['IMDB_Rating', 'Gross', 'Runtime', 'No_of_Votes']].mean()
+            
+            # Рассчитываем отклонения от среднего
+            rating_diff = cluster_means['IMDB_Rating'] - global_stats['IMDB_Rating']
+            gross_diff = cluster_means['Gross'] - global_stats['Gross']
+            runtime_diff = cluster_means['Runtime'] - global_stats['Runtime']
+            votes_diff = cluster_means['No_of_Votes'] - global_stats['No_of_Votes']
+            
+            # Определяем характеристики
+            traits = []
+            if gross_diff > global_stats['Gross'] * 0.5:  # На 50% выше среднего
+                traits.append("высокобюджетный")
+            elif gross_diff < -global_stats['Gross'] * 0.3:  # На 30% ниже среднего
+                traits.append("низкобюджетный")
+            
+            if rating_diff > 0.5:  # Рейтинг значительно выше
+                traits.append("высокооцененный")
+            elif rating_diff < -0.3:  # Рейтинг значительно ниже
+                traits.append("низкооцененный")
+            
+            if runtime_diff > 20:  # Длиннее на 20+ минут
+                traits.append("продолжительный")
+            elif runtime_diff < -15:  # Короче на 15+ минут
+                traits.append("короткометражный")
+            
+            if votes_diff > global_stats['No_of_Votes'] * 0.5:  # Много голосов
+                traits.append("популярный")
+            
+            # Генерируем описание на основе характеристик
+            if traits:
+                description = f"Фильмы этого кластера: {', '.join(traits)}"
+            else:
+                description = "Средние фильмы по всем параметрам"
+            
+            # Определяем тип (блокбастер, артхаус и т.д.)
+            if "высокобюджетный" in traits and "популярный" in traits and rating_diff > 0:
+                cluster_type = "БЛОКБАСТЕРЫ"
+            elif "низкобюджетный" in traits and "высокооцененный" in traits:
+                cluster_type = "АРТХАУС И КРИТИЧЕСКИЕ ХИТЫ"
+            elif "низкооцененный" in traits and "высокобюджетный" in traits:
+                cluster_type = "КОММЕРЧЕСКИЕ ПРОЕКТЫ"
+            elif "короткометражный" in traits:
+                cluster_type = "КОРОТКОМЕТРАЖКИ"
+            elif "продолжительный" in traits:
+                cluster_type = "ЭПИЧЕСКИЕ ЛЕНТЫ"
+            elif rating_diff > 0.7:
+                cluster_type = "ВЫСОКООЦЕНЕННЫЕ ФИЛЬМЫ"
+            else:
+                cluster_type = "СРЕДНЕСТАТИСТИЧЕСКИЕ ФИЛЬМЫ"
+            
+            return cluster_type, description
+
+        # Рассчитываем глобальную статистику
+        global_stats = df_num[['IMDB_Rating', 'Gross', 'Runtime', 'No_of_Votes']].mean()
+        
+        # Создаем словарь описаний кластеров
+        cluster_descriptions = {}
+        for cluster_id in range(k):
+            cluster_data = df_num[df_num['Cluster'] == cluster_id]
+            cluster_type, description = get_cluster_description(cluster_data, global_stats)
+            cluster_descriptions[cluster_id] = {
+                'type': cluster_type,
+                'description': description,
+                'count': len(cluster_data),
+                'avg_rating': cluster_data['IMDB_Rating'].mean(),
+                'avg_gross': cluster_data['Gross'].mean(),
+                'avg_runtime': cluster_data['Runtime'].mean()
+            }
+
         pca = PCA(n_components=2, random_state=42)
         df_num[['PCA1','PCA2']] = pca.fit_transform(X_scaled)
 
-        fig = px.scatter(
-            df_num, x="PCA1", y="PCA2", color="Cluster", size="Gross_log", opacity=0.75,
-            hover_data=["IMDB_Rating", "Gross", "Runtime", "No_of_Votes", "Released_Year"],
-            title="Кластеры фильмов (PCA 2D)"
+        # Обновляем метки кластеров для отображения с описаниями
+        df_num['Cluster_Label'] = df_num['Cluster'].apply(
+            lambda x: f"Кластер {x}: {cluster_descriptions[x]['type']}"
         )
+
+        fig = px.scatter(
+            df_num, x="PCA1", y="PCA2", color="Cluster_Label", size="Gross_log", opacity=0.75,
+            hover_data=["IMDB_Rating", "Gross", "Runtime", "No_of_Votes", "Released_Year"],
+            title="Кластеры фильмов (PCA 2D)",
+            color_discrete_sequence=px.colors.qualitative.Set2
+        )
+        
+        # Улучшаем легенду
+        fig.update_layout(
+            legend_title_text="Типы кластеров",
+            legend=dict(
+                yanchor="top",
+                y=0.99,
+                xanchor="left",
+                x=1.02,
+                bgcolor='rgba(255, 255, 255, 0.8)'
+            )
+        )
+        
         st.plotly_chart(fig, use_container_width=True)
+        
+        # ---------------------------
+        # 2. ПАНЕЛЬ С ОПИСАНИЯМИ КЛАСТЕРОВ
+        # ---------------------------
+        st.subheader("Описание кластеров")
+        
+        # Создаем таблицу с описаниями
+        desc_data = []
+        for cluster_id in range(k):
+            desc = cluster_descriptions[cluster_id]
+            desc_data.append({
+                'Кластер': f"Кластер {cluster_id}",
+                'Тип': desc['type'],
+                'Кол-во фильмов': desc['count'],
+                'Ср. рейтинг': f"{desc['avg_rating']:.2f}",
+                'Ср. сборы': f"${desc['avg_gross']:,.0f}",
+                'Ср. длит.': f"{desc['avg_runtime']:.0f} мин",
+                'Описание': desc['description']
+            })
+        
+        desc_df = pd.DataFrame(desc_data)
+        st.dataframe(
+            desc_df,
+            column_config={
+                "Кластер": st.column_config.TextColumn(width="small"),
+                "Тип": st.column_config.TextColumn(width="medium"),
+                "Описание": st.column_config.TextColumn(width="large")
+            },
+            hide_index=True,
+            use_container_width=True
+        )
 
     # ---------------------------
     # 2. ТРЕНДЫ И ВРЕМЕННЫЕ РЯДЫ
